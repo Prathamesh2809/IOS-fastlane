@@ -22,7 +22,7 @@ jobs:
       - name: Install Fastlane
         run: sudo gem install fastlane
 
-      - name: Test App Store Connection
+      - name: Create API Key JSON
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
@@ -30,14 +30,18 @@ jobs:
         run: |
           echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
 
+          KEY_CONTENT=$(cat AuthKey.p8 | awk '{printf "%s\\n", $0}')
+
           cat > api_key.json <<EOF
           {
             "key_id": "$APP_STORE_CONNECT_API_KEY_KEY_ID",
             "issuer_id": "$APP_STORE_CONNECT_API_KEY_ISSUER_ID",
-            "key_filepath": "$(pwd)/AuthKey.p8"
+            "key": "$KEY_CONTENT"
           }
           EOF
 
+      - name: Test App Store Connect Connection
+        run: |
           fastlane pilot list \
             --api_key_path api_key.json \
             --app_identifier "com.yapsody.SampleApp" \
