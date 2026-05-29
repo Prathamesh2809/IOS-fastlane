@@ -28,4 +28,4 @@ jobs:
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
         run: |
-          fastlane pilot list --verbose
+          fastlane pilot list --app_identifier "com.yapsody.SampleApp" --verbose
