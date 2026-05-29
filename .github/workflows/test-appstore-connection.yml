@@ -28,4 +28,17 @@ jobs:
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
         run: |
-          fastlane pilot list --app_identifier "com.yapsody.SampleApp" --verbose
+          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
+
+          cat > api_key.json <<EOF
+          {
+            "key_id": "$APP_STORE_CONNECT_API_KEY_KEY_ID",
+            "issuer_id": "$APP_STORE_CONNECT_API_KEY_ISSUER_ID",
+            "key_filepath": "$(pwd)/AuthKey.p8"
+          }
+          EOF
+
+          fastlane pilot list \
+            --api_key_path api_key.json \
+            --app_identifier "com.yapsody.SampleApp" \
+            --verbose
