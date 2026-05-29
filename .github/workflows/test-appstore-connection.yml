@@ -17,10 +17,10 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: '3.1'
+          ruby-version: '3.3'
 
       - name: Install Fastlane
-        run: sudo gem install fastlane
+        run: sudo gem install fastlane -v 2.236.0
 
       - name: Create App Store Connect API Key
         env:
@@ -28,29 +28,17 @@ jobs:
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
         run: |
-          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
+          TMPKEY=$(mktemp /tmp/AuthKey.XXXXXX.p8)
+          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > "$TMPKEY"
+          chmod 600 "$TMPKEY"
 
           cat > api_key.json <<EOF
           {
             "key_id": "$APP_STORE_CONNECT_API_KEY_KEY_ID",
             "issuer_id": "$APP_STORE_CONNECT_API_KEY_ISSUER_ID",
-            "key": "$(awk '{printf "%s\\n", $0}' AuthKey.p8)"
+            "key_filepath": "$TMPKEY"
           }
           EOF
-
-      - name: Debug API Key
-        env:
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
-        run: |
-          echo "Key ID Present:"
-          [ -n "$APP_STORE_CONNECT_API_KEY_KEY_ID" ] && echo YES || echo NO
-
-          echo "Issuer ID Present:"
-          [ -n "$APP_STORE_CONNECT_API_KEY_ISSUER_ID" ] && echo YES || echo NO
-
-          echo "P8 File Created:"
-          ls -l AuthKey.p8
 
       - name: Test App Store Connect Connection
         env:
