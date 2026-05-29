@@ -37,10 +37,20 @@ jobs:
             "key": "$(awk '{printf "%s\\n", $0}' AuthKey.p8)"
           }
           EOF
-        
+
       - name: Debug API Key
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
         run: |
-            cat api_key.json
+          echo "Key ID Present:"
+          [ -n "$APP_STORE_CONNECT_API_KEY_KEY_ID" ] && echo YES || echo NO
+
+          echo "Issuer ID Present:"
+          [ -n "$APP_STORE_CONNECT_API_KEY_ISSUER_ID" ] && echo YES || echo NO
+
+          echo "P8 File Created:"
+          ls -l AuthKey.p8
 
       - name: Test App Store Connect Connection
         env:
