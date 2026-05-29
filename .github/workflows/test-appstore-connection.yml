@@ -37,6 +37,10 @@ jobs:
             "key": "$(awk '{printf "%s\\n", $0}' AuthKey.p8)"
           }
           EOF
+        
+      - name: Debug API Key
+        run: |
+            cat api_key.json
 
       - name: Test App Store Connect Connection
         env:
