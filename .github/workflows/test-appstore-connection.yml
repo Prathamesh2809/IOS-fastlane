@@ -11,40 +11,28 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16.2
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app
-
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
 
       - name: Install Fastlane
-        run: sudo gem install fastlane -v 2.236.0
+        run: sudo gem install fastlane
 
-      - name: Create App Store Connect API Key
+      - name: Test App Store Connect Connection
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
         run: |
-          TMPKEY=$(mktemp /tmp/AuthKey.XXXXXX.p8)
-          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > "$TMPKEY"
-          chmod 600 "$TMPKEY"
+          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
 
-          cat > api_key.json <<EOF
-          {
-            "key_id": "$APP_STORE_CONNECT_API_KEY_KEY_ID",
-            "issuer_id": "$APP_STORE_CONNECT_API_KEY_ISSUER_ID",
-            "key_filepath": "$TMPKEY"
-          }
-          EOF
+          fastlane run app_store_connect_api_key \
+            key_id:"$APP_STORE_CONNECT_API_KEY_KEY_ID" \
+            issuer_id:"$APP_STORE_CONNECT_API_KEY_ISSUER_ID" \
+            key_filepath:"./AuthKey.p8" \
+            in_house:false
 
-      - name: Test App Store Connect Connection
-        env:
-          APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
-        run: |
-          fastlane pilot list \
-            --api_key_path api_key.json \
-            --app_identifier "$APP_IDENTIFIER" \
-            --verbose
+          echo "✅ Connection successful!"
+
+          rm -f AuthKey.p8
