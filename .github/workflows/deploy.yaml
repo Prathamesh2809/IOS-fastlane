@@ -1,31 +1,42 @@
-name: iOS Deploy to TestFlight
- 
+name: Deploy iOS App
+
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
- 
+
 jobs:
   deploy:
     runs-on: [self-hosted, macOS, X64]
- 
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
- 
+
       - name: Install Fastlane
-        run: gem install fastlane --no-document
- 
-      - name: Run Fastlane Beta Lane
+        run: |
+          sudo gem install fastlane --no-document
+          fastlane --version
+
+      - name: Create App Store Connect API Key
         env:
+          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
+        run: |
+          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
+
+      - name: Deploy to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
           XCODE_PROJECT: ${{ secrets.XCODE_PROJECT }}
           XCODE_SCHEME: ${{ secrets.XCODE_SCHEME }}
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
-        run: fastlane beta
+        run: |
+          fastlane beta
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f AuthKey.p8
