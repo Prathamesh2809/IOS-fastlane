@@ -5,15 +5,27 @@ on:
 
 jobs:
   deploy:
-    runs-on: [self-hosted, macOS, X64]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Fastlane
+      - name: Verify Environment
         run: |
-          sudo gem install fastlane --no-document
+          echo "Current User:"
+          whoami
+
+          echo "Ruby Version:"
+          ruby -v
+
+          echo "Xcode Version:"
+          xcodebuild -version
+
+          echo "Fastlane Location:"
+          which fastlane
+
+          echo "Fastlane Version:"
           fastlane --version
 
       - name: Create App Store Connect API Key
@@ -27,14 +39,16 @@ jobs:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
+
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+
           XCODE_PROJECT: ${{ secrets.XCODE_PROJECT }}
           XCODE_SCHEME: ${{ secrets.XCODE_SCHEME }}
         run: |
-          fastlane beta
+          fastlane beta --verbose
 
       - name: Cleanup
         if: always()
