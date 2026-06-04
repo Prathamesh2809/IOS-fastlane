@@ -1,28 +1,22 @@
 name: iOS Deploy to TestFlight
-
+ 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-
+ 
 jobs:
   deploy:
-    runs-on: macos-14
-
+    runs-on: [self-hosted, macOS, X64]
+ 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-
+ 
       - name: Install Fastlane
-        run: gem install fastlane
-
+        run: gem install fastlane --no-document
+ 
       - name: Run Fastlane Beta Lane
         env:
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
