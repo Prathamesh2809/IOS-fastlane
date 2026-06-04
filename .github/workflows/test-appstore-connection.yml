@@ -1,0 +1,38 @@
+name: Test App Store Connection
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-connection:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Fastlane
+        run: sudo gem install fastlane
+
+      - name: Test App Store Connect Connection
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
+        run: |
+          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
+
+          fastlane run app_store_connect_api_key \
+            key_id:"$APP_STORE_CONNECT_API_KEY_KEY_ID" \
+            issuer_id:"$APP_STORE_CONNECT_API_KEY_ISSUER_ID" \
+            key_filepath:"./AuthKey.p8" \
+            in_house:false
+
+          echo "✅ Connection successful!"
+
+          rm -f AuthKey.p8
