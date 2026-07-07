@@ -65,7 +65,12 @@ platform :ios do
         output_directory: File.join(root_dir, "build"),
         output_name: "#{ENV['XCODE_SCHEME']}.ipa",
         export_method: "development",
-        xcargs: "DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
+        export_options: {
+          method: "development",
+          signingStyle: "automatic"
+        },
+        # Added -allowProvisioningUpdates to allow Xcode to map the profile dynamically
+        xcargs: "DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} -allowProvisioningUpdates OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
       )
 
       UI.success("🎉 SampleApp development build compiled successfully: #{build_number}")
