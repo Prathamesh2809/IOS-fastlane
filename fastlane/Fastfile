@@ -3,9 +3,13 @@ default_platform(:ios)
 platform :ios do
   desc "Build and deploy app to TestFlight using GitHub Actions"
   lane :beta do
-    # 1. Dynamically resolve absolute paths to the project root directory
-    project_name  = ENV["XCODE_PROJECT"].to_s.strip
-    project_path  = File.expand_path(File.join("..", "#{project_name}.xcodeproj"), __dir__)
+    # Clean up the secret value in case it includes the extension
+    raw_project  = ENV["XCODE_PROJECT"].to_s.strip
+    project_name = raw_project.gsub(/\.xcodeproj$/, "")
+    
+    # Map explicit base paths directly targeting your root layout
+    root_dir     = File.expand_path("..", __dir__)
+    project_path = File.join(root_dir, "#{project_name}.xcodeproj")
     
     cert_path     = File.expand_path("../dist_cert.p12", __dir__)
     profile_path  = File.expand_path("../profile.mobileprovision", __dir__)
@@ -14,10 +18,11 @@ platform :ios do
     keychain_password = SecureRandom.hex(16)
 
     begin
-      # Guard Clause: Confirm directory mapping is spot on before starting execution
-      unless File.exist?(File.join(project_path, "project.pbxproj"))
-        UI.user_error!("Could not find your Xcode project at resolved absolute path: #{project_path}")
+      # 1. Verify project exists explicitly before proceeding
+      unless Dir.exist?(project_path)
+        UI.user_error!("Could not find your Xcode project directory at expected root: #{project_path}")
       end
+      UI.message("🎯 Successfully targeting Xcode project at: #{project_path}")
 
       # 2. Create a secure, temporary keychain on the cloud runner
       create_keychain(
@@ -79,7 +84,7 @@ platform :ios do
         project: project_path,
         configuration: "Release",
         clean: true,
-        output_directory: "./build",
+        output_directory: File.join(root_dir, "build"),
         output_name: "#{ENV['XCODE_SCHEME']}.ipa",
         export_method: "app-store",
         export_options: {
@@ -95,15 +100,15 @@ platform :ios do
       # 10. Push Binary Asset to Apple TestFlight
       upload_to_testflight(
         api_key: api_key,
-        ipa: "./build/#{ENV['XCODE_SCHEME']}.ipa",
+        ipa: File.join(root_dir, "build", "#{ENV['XCODE_SCHEME']}.ipa"),
         skip_waiting_for_build_processing: true
       )
 
       UI.success("🚀 Successfully shipped version to TestFlight! Build: #{build_number}")
 
     ensure
-      # Always wipe secrets and clean up the environment
-      [cert_path, profile_path, decoded_plist].each { |f| File.delete(f) if File.exist?(f) }
+      # Always wipe secrets and clean up the environment safely
+      [cert_path, profile_path, decoded_plist].each { |f| File.delete(f) if f && File.exist?(f) }
       delete_keychain(name: keychain_name) rescue nil
     end
   end
