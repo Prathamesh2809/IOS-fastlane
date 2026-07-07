@@ -1,30 +1,17 @@
-require "shellwords"
-require "securerandom"
-require "tmpdir"
-
 default_platform(:ios)
 
 platform :ios do
-  desc "Build and upload a new build to TestFlight"
+  desc "Build and deploy app to TestFlight using GitHub Actions"
   lane :beta do
-    # 1. Sanitize project path and ensure it scales correctly from the repo root
-    project_name      = ENV["XCODE_PROJECT"].to_s.strip
-    project_path      = File.expand_path(File.join("..", project_name), __dir__)
+    # Define dynamic paths inside the runner workspace
+    cert_path = File.expand_path("../dist_cert.p12", __dir__)
+    profile_path = File.expand_path("../profile.mobileprovision", __dir__)
     
-    keychain_name     = "ci_build_#{Time.now.to_i}.keychain"
+    keychain_name = "github_action_ci"
     keychain_password = SecureRandom.hex(16)
-    api_key_path      = "#{Dir.tmpdir}/AuthKey_#{ENV['APP_STORE_CONNECT_API_KEY_KEY_ID']}.p8"
-    cert_path         = "#{Dir.tmpdir}/dist_cert_#{Time.now.to_i}.p12"
-    profile_path      = "#{Dir.tmpdir}/profile_#{Time.now.to_i}.mobileprovision"
-    decoded_plist_path = "#{Dir.tmpdir}/profile_#{Time.now.to_i}_decoded.plist"
 
     begin
-      # Guard Clause
-      unless File.exist?(File.join(project_path, "project.pbxproj"))
-        UI.user_error!("Cannot find a valid Xcode project file at: #{project_path}")
-      end
-
-      # 2. Setup Ephemeral Keychain
+      # 1. Create a secure, temporary keychain on the cloud runner
       create_keychain(
         name: keychain_name,
         password: keychain_password,
@@ -34,67 +21,58 @@ platform :ios do
         lock_when_sleeps: false
       )
 
-      # CRITICAL ADDITION: Force macOS to search this custom keychain for signing certificates
-      keychain_path_resolved = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
-      sh("security list-keychains -d user -s #{keychain_path_resolved.shellescape}")
+      # 2. Force the runner to prioritize this keychain's pathing array
+      keychain_db_path = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
+      sh("security list-keychains -d user -s #{keychain_db_path.shellescape}")
 
-      # 3. App Store Connect API key config
-      File.write(api_key_path, Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"]))
+      # 3. Import the p12 Certificate and unblock code signing access controls
+      File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
+      sh("security import #{cert_path.shellescape} -k #{keychain_db_path.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
+      sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k #{keychain_password.shellescape} #{keychain_db_path.shellescape} > /dev/null 2>&1")
+
+      # 4. Install the mobile provision profile
+      File.write(profile_path, Base64.decode64(ENV["IOS_PROVISIONING_PROFILE"]))
+      sh("mkdir -p ~/Library/MobileDevice/Provisioning\\ Profiles")
+      
+      # Extract Provisioning Profile Metadata safely
+      decoded_plist = "/tmp/profile_decoded.plist"
+      sh("security cms -D -i #{profile_path.shellescape} > #{decoded_plist}")
+      profile_uuid = sh("/usr/libexec/PlistBuddy -c 'Print :UUID' #{decoded_plist}").strip
+      profile_name = sh("/usr/libexec/PlistBuddy -c 'Print :Name' #{decoded_plist}").strip
+      sh("cp #{profile_path.shellescape} ~/Library/MobileDevice/Provisioning\\ Profiles/#{profile_uuid}.mobileprovision")
+
+      # 5. Authenticate via App Store Connect API using direct string parsing
       api_key = app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
         issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
-        key_filepath: api_key_path,
-        in_house: false
+        key_content: Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"])
       )
 
-      # 4. Import the distribution certificate with unlocked execution permissions
-      File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
-      sh("security import #{cert_path.shellescape} -k #{keychain_path_resolved.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
-
-      # 5. Install and parse provisioning profile
-      File.write(profile_path, Base64.decode64(ENV["IOS_PROVISIONING_PROFILE"]))
-      install_provisioning_profile(path: profile_path)
-
-      sh("security cms -D -i #{profile_path.shellescape} > #{decoded_plist_path.shellescape}")
-      profile_name = sh("/usr/libexec/PlistBuddy -c 'Print :Name' #{decoded_plist_path.shellescape}").strip
-      profile_uuid = sh("/usr/libexec/PlistBuddy -c 'Print :UUID' #{decoded_plist_path.shellescape}").strip
-
-      UI.message("Installed provisioning profile: #{profile_name} (#{profile_uuid})")
-
-      # 6. Resolve build number
-      build_number =
-        if ENV["BUILD_NUMBER"] && !ENV["BUILD_NUMBER"].empty?
-          ENV["BUILD_NUMBER"].to_s.strip
-        else
-          (latest_testflight_build_number(
-            api_key: api_key,
-            app_identifier: ENV["APP_IDENTIFIER"]
-          ) + 1).to_s
-        end
-
+      # 6. Generate an incremental Timestamp Build Number
+      build_number = Time.now.strftime("%Y%m%d%H%M")
       increment_build_number(
         build_number: build_number,
-        xcodeproj: project_path
+        xcodeproj: "#{ENV['XCODE_PROJECT']}.xcodeproj"
       )
 
-      # 7. Force Manual Code Signing in the project structure
+      # 7. Apply Manual Signing Configurations natively to target structures
       update_code_signing_settings(
         use_automatic_signing: false,
         team_id: ENV["TEAM_ID"],
         code_sign_identity: "Apple Distribution",
         profile_name: profile_name,
-        targets: [ENV["XCODE_SCHEME"].to_s.strip],
-        path: project_path
+        targets: [ENV["XCODE_SCHEME"]],
+        path: "#{ENV['XCODE_PROJECT']}.xcodeproj"
       )
 
-      # 8. Build App
+      # 8. Archive and Package App Binary
       build_app(
-        scheme: ENV["XCODE_SCHEME"].to_s.strip,
-        project: project_path,
+        scheme: ENV["XCODE_SCHEME"],
+        project: "#{ENV['XCODE_PROJECT']}.xcodeproj",
         configuration: "Release",
         clean: true,
         output_directory: "./build",
-        output_name: "#{ENV['XCODE_SCHEME'].to_s.strip}.ipa",
+        output_name: "#{ENV['XCODE_SCHEME']}.ipa",
         export_method: "app-store",
         export_options: {
           method: "app-store",
@@ -106,19 +84,18 @@ platform :ios do
         xcargs: "CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=\"Apple Distribution\" DEVELOPMENT_TEAM=#{ENV['TEAM_ID']}"
       )
 
-      # 9. Upload to TestFlight
+      # 9. Push Binary Asset to Apple TestFlight
       upload_to_testflight(
         api_key: api_key,
-        ipa: "./build/#{ENV['XCODE_SCHEME'].to_s.strip}.ipa",
-        skip_waiting_for_build_processing: true,
-        distribute_external: false
+        ipa: "./build/#{ENV['XCODE_SCHEME']}.ipa",
+        skip_waiting_for_build_processing: true
       )
 
-      UI.success("✅ Uploaded to TestFlight — build #{build_number}")
+      UI.success("🚀 Successfully shipped version to TestFlight! Build: #{build_number}")
 
     ensure
-      # Always clean up secrets and keys from the runner's disk
-      [api_key_path, cert_path, profile_path, decoded_plist_path].each { |f| File.delete(f) if File.exist?(f) }
+      # Always wipe secrets and clean up the environment
+      [cert_path, profile_path, decoded_plist].each { |f| File.delete(f) if File.exist?(f) }
       delete_keychain(name: keychain_name) rescue nil
     end
   end
