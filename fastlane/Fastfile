@@ -47,7 +47,7 @@ platform :ios do
       get_provisioning_profile(
         development: true, 
         app_identifier: ENV["APP_IDENTIFIER"],
-        ignore_certificate_validation: true # 💡 Skip local identity check
+        skip_certificate_verification: true # 💡 Skip local identity check
       )
 
       # 5. Handle Incrementing Version Control
