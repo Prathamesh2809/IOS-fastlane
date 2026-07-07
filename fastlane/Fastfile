@@ -1,7 +1,7 @@
 default_platform(:ios)
 
 platform :ios do
-  desc "Build SampleApp using cloud-managed iOS Development signing"
+  desc "Build SampleApp using your existing local P12 certificate asset"
   lane :beta do
     raw_project  = ENV["XCODE_PROJECT"].to_s.strip
     project_name = raw_project.gsub(/\.xcodeproj$/, "")
@@ -9,6 +9,7 @@ platform :ios do
     root_dir     = File.expand_path("..", __dir__)
     project_path = File.join(root_dir, "#{project_name}.xcodeproj")
     
+    cert_path     = File.expand_path("../existing_cert.p12", __dir__)
     keychain_name = "github_action_ci"
     keychain_password = SecureRandom.hex(16)
 
@@ -30,33 +31,37 @@ platform :ios do
       keychain_db_path = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
       sh("security list-keychains -d user -s #{keychain_db_path.shellescape}")
 
-      # 2. Authenticate via App Store Connect API
+      # 2. Write and import your EXISTING manual P12 certificate 
+      # (Bypasses Apple's generation limits completely)
+      File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
+      sh("security import #{cert_path.shellescape} -k #{keychain_db_path.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
+      sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k #{keychain_password.shellescape} #{keychain_db_path.shellescape} > /dev/null 2>&1")
+
+      # 3. Authenticate via App Store Connect API
       api_key = app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
         issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
         key_content: Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"])
       )
 
-      # 3. Dynamically fetch fresh Development Certificate & Profile from Apple
-      # This completely bypasses the need for manual P12 / Provisioning file variables
-      get_certificates(development: true, keychain_path: keychain_db_path, keychain_password: keychain_password)
+      # 4. Fetch the matching provisioning profile from Apple (Profiles do not have strict capping limits)
       get_provisioning_profile(development: true, app_identifier: ENV["APP_IDENTIFIER"])
 
-      # 4. Handle Incrementing Version Control
+      # 5. Handle Incrementing Version Control
       build_number = Time.now.strftime("%Y%m%d%H%M")
       increment_build_number(
         build_number: build_number,
         xcodeproj: project_path
       )
 
-      # 5. Tell Xcode to use the freshly downloaded automatic cloud profiles
+      # 6. Apply cloud profile configuration settings
       update_code_signing_settings(
         use_automatic_signing: true,
         team_id: ENV["TEAM_ID"],
         path: project_path
       )
 
-      # 6. Compile the binary using Development settings
+      # 7. Compile the binary using the existing certificate in the runner's keychain
       build_app(
         scheme: ENV["XCODE_SCHEME"],
         project: project_path,
@@ -69,13 +74,13 @@ platform :ios do
           method: "development",
           signingStyle: "automatic"
         },
-        # Added -allowProvisioningUpdates to allow Xcode to map the profile dynamically
         xcargs: "DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} -allowProvisioningUpdates OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
       )
 
-      UI.success("🎉 SampleApp development build compiled successfully: #{build_number}")
+      UI.success("🎉 SampleApp built successfully using your existing certificate!")
 
     ensure
+      File.delete(cert_path) if File.exist?(cert_path)
       delete_keychain(name: keychain_name) rescue nil
     end
   end
