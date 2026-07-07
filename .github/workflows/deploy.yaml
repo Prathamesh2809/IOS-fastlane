@@ -72,9 +72,6 @@ jobs:
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
 
-          XCODE_PROJECT: ${{ secrets.XCODE_PROJECT }}
-          XCODE_SCHEME: ${{ secrets.XCODE_SCHEME }}
-
           BUILD_NUMBER: ${{ github.event.inputs.BUILD_NUMBER }}
         run: |
           fastlane beta --verbose
