@@ -7,7 +7,7 @@ default_platform(:ios)
 platform :ios do
   desc "Build and upload a new build to TestFlight"
   lane :beta do
-    # 1. Sanitize project path up-front to drop trailing newlines or spaces from secrets
+    # 1. Sanitize project path and ensure it scales correctly from the repo root
     project_name      = ENV["XCODE_PROJECT"].to_s.strip
     project_path      = File.expand_path(File.join("..", project_name), __dir__)
     
@@ -19,13 +19,12 @@ platform :ios do
     decoded_plist_path = "#{Dir.tmpdir}/profile_#{Time.now.to_i}_decoded.plist"
 
     begin
-      # Guard Clause: Fail fast if the project path is invalid before doing any heavy lifting
+      # Guard Clause
       unless File.exist?(File.join(project_path, "project.pbxproj"))
         UI.user_error!("Cannot find a valid Xcode project file at: #{project_path}")
       end
 
       # 2. Setup Ephemeral Keychain
-      # Set default_keychain: true so xcodebuild on the hosted runner prioritizes this keychain
       create_keychain(
         name: keychain_name,
         password: keychain_password,
@@ -44,14 +43,12 @@ platform :ios do
         in_house: false
       )
 
-      # 4. Import the distribution certificate
+      # 4. Import the distribution certificate with unlocked execution permissions
       File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
-      import_certificate(
-        certificate_path: cert_path,
-        certificate_password: ENV["IOS_CERTIFICATE_PASSWORD"],
-        keychain_name: keychain_name,
-        keychain_password: keychain_password
-      )
+      
+      # We use a custom shell command to bypass UI prompts for the imported keys
+      keychain_path_resolved = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
+      sh("security import #{cert_path.shellescape} -k #{keychain_path_resolved.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
 
       # 5. Install and parse provisioning profile
       File.write(profile_path, Base64.decode64(ENV["IOS_PROVISIONING_PROFILE"]))
