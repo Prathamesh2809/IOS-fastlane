@@ -12,8 +12,7 @@ jobs:
     runs-on: macos-26
 
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Select Xcode 26.5
         run: |
@@ -38,7 +37,6 @@ jobs:
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
         run: |
-
           echo "$IOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
           echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
 
@@ -61,25 +59,77 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
-          echo "================ CERTIFICATE ================"
-          security find-identity -v -p codesigning
+      ####################################################################
+      # DEBUG STARTS HERE
+      ####################################################################
 
-          echo "================ PROFILE ================"
+      - name: Debug Code Signing
+        run: |
+          echo "================ KEYCHAINS ================"
+          security list-keychains
+
+          echo ""
+          echo "================ DEFAULT KEYCHAIN ================"
+          security default-keychain
+
+          echo ""
+          echo "================ AVAILABLE IDENTITIES ================"
+          security find-identity -v -p codesigning build.keychain
+
+          echo ""
+          echo "================ CERTIFICATES ================"
+          security find-certificate -a -c "Apple Distribution" -Z build.keychain
+
+      - name: Debug Provisioning Profile
+        run: |
           security cms -D -i profile.mobileprovision > profile.plist
 
+          echo "===== PROFILE ====="
           /usr/libexec/PlistBuddy -c "Print :Name" profile.plist
           /usr/libexec/PlistBuddy -c "Print :UUID" profile.plist
           /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" profile.plist
           /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" profile.plist
+          /usr/libexec/PlistBuddy -c "Print :DeveloperCertificates" profile.plist || true
+
+      - name: Debug Bundle ID
+        run: |
+          echo "===== Bundle Identifier ====="
+          /usr/libexec/PlistBuddy \
+            -c "Print :CFBundleIdentifier" \
+            SampleApp/Info.plist
+
+      - name: Debug Project Signing
+        run: |
+          echo "===== Signing Settings ====="
+
+          grep -n "CODE_SIGN_STYLE" SampleApp.xcodeproj/project.pbxproj || true
+          grep -n "CODE_SIGN_IDENTITY" SampleApp.xcodeproj/project.pbxproj || true
+          grep -n "DEVELOPMENT_TEAM" SampleApp.xcodeproj/project.pbxproj || true
+          grep -n "PROVISIONING_PROFILE_SPECIFIER" SampleApp.xcodeproj/project.pbxproj || true
+          grep -n "PRODUCT_BUNDLE_IDENTIFIER" SampleApp.xcodeproj/project.pbxproj || true
+
+      - name: Debug Build Settings
+        run: |
+          xcodebuild \
+            -project SampleApp.xcodeproj \
+            -scheme SampleApp \
+            -showBuildSettings \
+            | egrep "PRODUCT_BUNDLE_IDENTIFIER|CODE_SIGN|PROVISIONING_PROFILE|DEVELOPMENT_TEAM"
+
+      - name: List Installed Profiles
+        run: |
+          ls -al ~/Library/MobileDevice/Provisioning\ Profiles
+
+      ####################################################################
+      # DEPLOY
+      ####################################################################
 
       - name: Deploy
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
-
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
-
           BUILD_NUMBER: ${{ github.event.inputs.BUILD_NUMBER }}
         run: |
           fastlane beta --verbose
