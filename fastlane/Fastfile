@@ -32,14 +32,19 @@ platform :ios do
     )
 
     build_app(
-      scheme: "SampleApp",
-      project: "SampleApp.xcodeproj",
-      configuration: "Release",
-      export_method: "app-store",
-      clean: true,
-      output_directory: "./build",
-      output_name: "SampleApp.ipa",
-      xcargs: "-allowProvisioningUpdates"
+    scheme: "SampleApp",
+    project: "SampleApp.xcodeproj",
+    configuration: "Release",
+    export_method: "app-store",
+    clean: true,
+    output_directory: "./build",
+    output_name: "SampleApp.ipa",
+    xcargs: %Q[
+        CODE_SIGN_STYLE=Manual
+        CODE_SIGN_IDENTITY="Apple Distribution"
+        DEVELOPMENT_TEAM=MWVFW922NX
+        PROVISIONING_PROFILE_SPECIFIER="match AppStore #{ENV["APP_IDENTIFIER"]}"
+    ]
     )
 
     upload_to_testflight(
