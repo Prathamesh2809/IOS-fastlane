@@ -15,9 +15,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: List Installed Xcodes
-        run: ls -1 /Applications | grep Xcode
-
       - name: Select Xcode 26.5
         run: |
           sudo xcode-select -s /Applications/Xcode_26.5.app
@@ -26,12 +23,8 @@ jobs:
       - name: Verify Environment
         run: |
           ruby -v
-          xcodebuild -version
           fastlane --version
-      
-      - name: List available schemes
-        run: |
-          xcodebuild -list -project SampleApp.xcodeproj
+          xcodebuild -version
 
       - name: Create App Store Connect API Key
         env:
@@ -45,6 +38,7 @@ jobs:
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
         run: |
+
           echo "$IOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
           echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
 
@@ -67,14 +61,24 @@ jobs:
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
 
-      - name: Deploy to TestFlight
+          echo "================ CERTIFICATE ================"
+          security find-identity -v -p codesigning
+
+          echo "================ PROFILE ================"
+          security cms -D -i profile.mobileprovision > profile.plist
+
+          /usr/libexec/PlistBuddy -c "Print :Name" profile.plist
+          /usr/libexec/PlistBuddy -c "Print :UUID" profile.plist
+          /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" profile.plist
+          /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" profile.plist
+
+      - name: Deploy
         env:
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
 
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
-          TEAM_ID: ${{ secrets.TEAM_ID }}
 
           BUILD_NUMBER: ${{ github.event.inputs.BUILD_NUMBER }}
         run: |
@@ -86,4 +90,5 @@ jobs:
           rm -f AuthKey.p8
           rm -f certificate.p12
           rm -f profile.mobileprovision
+          rm -f profile.plist
           security delete-keychain build.keychain || true

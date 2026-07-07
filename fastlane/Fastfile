@@ -27,18 +27,19 @@ platform :ios do
     end
 
     increment_build_number(
-    build_number: build_number,
-    xcodeproj: "SampleApp.xcodeproj"
+      build_number: build_number,
+      xcodeproj: "SampleApp.xcodeproj"
     )
 
     build_app(
-    scheme: "SampleApp",
-    project: "SampleApp.xcodeproj",
-    configuration: "Release",
-    export_method: "app-store",
-    clean: true,
-    output_directory: "./build",
-    output_name: "SampleApp.ipa"
+      scheme: "SampleApp",
+      project: "SampleApp.xcodeproj",
+      configuration: "Release",
+      export_method: "app-store",
+      clean: true,
+      output_directory: "./build",
+      output_name: "SampleApp.ipa",
+      xcargs: "-allowProvisioningUpdates"
     )
 
     upload_to_testflight(
@@ -47,7 +48,7 @@ platform :ios do
       skip_waiting_for_build_processing: true
     )
 
-    UI.success("Uploaded to TestFlight! Build: #{build_number}")
+    UI.success("Uploaded to TestFlight! Build #{build_number}")
 
   ensure
     File.delete(api_key_path) if File.exist?(api_key_path)
