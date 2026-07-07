@@ -7,6 +7,10 @@ default_platform(:ios)
 platform :ios do
   desc "Build and upload a new build to TestFlight"
   lane :beta do
+    # 1. Sanitize project path up-front to drop trailing newlines or spaces from secrets
+    project_name      = ENV["XCODE_PROJECT"].to_s.strip
+    project_path      = File.expand_path(project_name)
+    
     keychain_name     = "ci_build_#{Time.now.to_i}.keychain"
     keychain_password = SecureRandom.hex(16)
     api_key_path      = "#{Dir.tmpdir}/AuthKey_#{ENV['APP_STORE_CONNECT_API_KEY_KEY_ID']}.p8"
@@ -15,18 +19,23 @@ platform :ios do
     decoded_plist_path = "#{Dir.tmpdir}/profile_#{Time.now.to_i}_decoded.plist"
 
     begin
-      # 1. Ephemeral, isolated keychain — never touches the runner's login keychain.
-      #    This is what makes repeated runs on the same self-hosted Mac safe.
+      # Guard Clause: Fail fast if the project path is invalid before doing any heavy lifting
+      unless File.exist?(File.join(project_path, "project.pbxproj"))
+        UI.user_error!("Cannot find a valid Xcode project file at: #{project_path}")
+      end
+
+      # 2. Setup Ephemeral Keychain
+      # Set default_keychain: true so xcodebuild on the hosted runner prioritizes this keychain
       create_keychain(
         name: keychain_name,
         password: keychain_password,
-        default_keychain: false,
+        default_keychain: true,
         unlock: true,
         timeout: 3600,
         lock_when_sleeps: false
       )
 
-      # 2. App Store Connect API key — no Apple ID / 2FA prompts, works headless.
+      # 3. App Store Connect API key config
       File.write(api_key_path, Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"]))
       api_key = app_store_connect_api_key(
         key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
@@ -35,7 +44,7 @@ platform :ios do
         in_house: false
       )
 
-      # 3. Import the distribution certificate into THIS run's keychain only.
+      # 4. Import the distribution certificate
       File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
       import_certificate(
         certificate_path: cert_path,
@@ -44,10 +53,7 @@ platform :ios do
         keychain_password: keychain_password
       )
 
-      # 4. Install the provisioning profile. NOTE: install_provisioning_profile
-      #    only returns the profile's UUID as a plain String, not a hash — so
-      #    we decode the profile ourselves (same as PlistBuddy would) to get
-      #    the real Name, which is what Xcode's signing settings actually want.
+      # 5. Install and parse provisioning profile
       File.write(profile_path, Base64.decode64(ENV["IOS_PROVISIONING_PROFILE"]))
       install_provisioning_profile(path: profile_path)
 
@@ -57,11 +63,10 @@ platform :ios do
 
       UI.message("Installed provisioning profile: #{profile_name} (#{profile_uuid})")
 
-      # 5. Resolve build number: manual override from workflow_dispatch input,
-      #    otherwise auto-increment off the latest TestFlight build.
+      # 6. Resolve build number
       build_number =
         if ENV["BUILD_NUMBER"] && !ENV["BUILD_NUMBER"].empty?
-          ENV["BUILD_NUMBER"]
+          ENV["BUILD_NUMBER"].to_s.strip
         else
           (latest_testflight_build_number(
             api_key: api_key,
@@ -71,29 +76,27 @@ platform :ios do
 
       increment_build_number(
         build_number: build_number,
-        xcodeproj: ENV["XCODE_PROJECT"]
+        xcodeproj: project_path
       )
 
-      # 6. Force manual signing pointed at exactly what we just installed.
-      #    This is the step that was missing before — without it, the project's
-      #    saved CODE_SIGN_STYLE can silently override your xcargs.
+      # 7. Force Manual Code Signing in the project structure
       update_code_signing_settings(
         use_automatic_signing: false,
         team_id: ENV["TEAM_ID"],
         code_sign_identity: "Apple Distribution",
         profile_name: profile_name,
-        targets: [ENV["XCODE_SCHEME"]],
-        path: ENV["XCODE_PROJECT"]
+        targets: [ENV["XCODE_SCHEME"].to_s.strip],
+        path: project_path
       )
 
-      # 7. Build
+      # 8. Build App
       build_app(
-        scheme: ENV["XCODE_SCHEME"],
-        project: ENV["XCODE_PROJECT"],
+        scheme: ENV["XCODE_SCHEME"].to_s.strip,
+        project: project_path,
         configuration: "Release",
         clean: true,
         output_directory: "./build",
-        output_name: "#{ENV['XCODE_SCHEME']}.ipa",
+        output_name: "#{ENV['XCODE_SCHEME'].to_s.strip}.ipa",
         export_method: "app-store",
         export_options: {
           method: "app-store",
@@ -101,13 +104,18 @@ platform :ios do
           provisioningProfiles: {
             ENV["APP_IDENTIFIER"] => profile_name
           }
-        }
+        },
+        xcargs: %Q[
+          CODE_SIGN_STYLE=Manual
+          CODE_SIGN_IDENTITY="Apple Distribution"
+          DEVELOPMENT_TEAM=#{ENV["TEAM_ID"]}
+        ]
       )
 
-      # 8. Upload
+      # 9. Upload to TestFlight
       upload_to_testflight(
         api_key: api_key,
-        ipa: "./build/#{ENV['XCODE_SCHEME']}.ipa",
+        ipa: "./build/#{ENV['XCODE_SCHEME'].to_s.strip}.ipa",
         skip_waiting_for_build_processing: true,
         distribute_external: false
       )
@@ -115,7 +123,7 @@ platform :ios do
       UI.success("✅ Uploaded to TestFlight — build #{build_number}")
 
     ensure
-      # Always clean up secrets from disk, even on failure.
+      # Always clean up secrets and keys from the runner's disk
       [api_key_path, cert_path, profile_path, decoded_plist_path].each { |f| File.delete(f) if File.exist?(f) }
       delete_keychain(name: keychain_name) rescue nil
     end
