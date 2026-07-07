@@ -38,9 +38,11 @@ platform :ios do
       keychain_db_path = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
       sh("security list-keychains -d user -s #{keychain_db_path.shellescape}")
 
-      # 4. Import the p12 Certificate and unblock code signing access controls
+      # 4. Import the p12 Certificate and unblock code signing access controls completely
       File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
       sh("security import #{cert_path.shellescape} -k #{keychain_db_path.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
+      
+      # Unlock keychain partition access arrays for modern codesign requirements
       sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k #{keychain_password.shellescape} #{keychain_db_path.shellescape} > /dev/null 2>&1")
 
       # 5. Install the mobile provision profile
@@ -78,7 +80,7 @@ platform :ios do
         path: project_path
       )
 
-      # 9. Archive and Package App Binary
+      # 9. Archive and Package App Binary with explicit code-signing parameter rules
       build_app(
         scheme: ENV["XCODE_SCHEME"],
         project: project_path,
@@ -94,7 +96,8 @@ platform :ios do
             ENV["APP_IDENTIFIER"] => profile_name
           }
         },
-        xcargs: "CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=\"Apple Distribution\" DEVELOPMENT_TEAM=#{ENV['TEAM_ID']}"
+        # Pass variables targeting Keychain structural frameworks directly into xcodebuild
+        xcargs: "CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=\"Apple Distribution\" DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
       )
 
       # 10. Push Binary Asset to Apple TestFlight
