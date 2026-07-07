@@ -105,11 +105,7 @@ platform :ios do
             ENV["APP_IDENTIFIER"] => profile_name
           }
         },
-        xcargs: %Q[
-          CODE_SIGN_STYLE=Manual
-          CODE_SIGN_IDENTITY="Apple Distribution"
-          DEVELOPMENT_TEAM=#{ENV["TEAM_ID"]}
-        ]
+        xcargs: "CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=\"Apple Distribution\" DEVELOPMENT_TEAM=#{ENV['TEAM_ID']}"
       )
 
       # 9. Upload to TestFlight
