@@ -1,157 +1,80 @@
-name: Deploy iOS App
+name: iOS TestFlight Deploy
 
 on:
   workflow_dispatch:
     inputs:
-      BUILD_NUMBER:
-        description: "Optional Build Number"
+      build_number:
+        description: "Override build number (leave blank to auto-increment from TestFlight)"
         required: false
+
+# Prevents two people triggering a deploy at the same time from racing.
+concurrency:
+  group: ios-testflight-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
     runs-on: macos-26
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub-hosted macOS runners ship several Xcode versions side by side —
+      # unlike a self-hosted box with one install, you have to pin this
+      # explicitly or you'll silently get whatever the image's default is.
       - name: Select Xcode 26.5
         run: |
           sudo xcode-select -s /Applications/Xcode_26.5.app
           xcodebuild -version
 
-      - name: Verify Environment
+      - name: Verify toolchain
         run: |
-          ruby -v
-          fastlane --version
-          xcodebuild -version
+          echo "Ruby: $(ruby -v)"
+          which bundle || gem install bundler
 
-      - name: Create App Store Connect API Key
+      - name: Install gems
+        run: bundle install
+
+      - name: Deploy to TestFlight
         env:
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
-        run: |
-          echo "$APP_STORE_CONNECT_API_KEY_B64" | base64 --decode > AuthKey.p8
-
-      - name: Setup Code Signing
-        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
           IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}
-        run: |
-
-          echo "$IOS_CERTIFICATE_P12" | base64 --decode > certificate.p12
-          echo "$IOS_PROVISIONING_PROFILE" | base64 --decode > profile.mobileprovision
-
-          security create-keychain -p "" build.keychain
-          security default-keychain -s build.keychain
-          security unlock-keychain -p "" build.keychain
-
-          security import certificate.p12 \
-            -k build.keychain \
-            -P "$IOS_CERTIFICATE_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security
-
-          security set-key-partition-list \
-            -S apple-tool:,apple:,codesign: \
-            -s \
-            -k "" \
-            build.keychain
-
-          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp profile.mobileprovision \
-             ~/Library/MobileDevice/Provisioning\ Profiles/
-
-      - name: Debug Keychain
-        run: |
-          echo "================ KEYCHAINS ================"
-          security list-keychains
-
-          echo ""
-          echo "================ DEFAULT KEYCHAIN ================"
-          security default-keychain
-
-          echo ""
-          echo "================ IDENTITIES ================"
-          security find-identity -v -p codesigning build.keychain
-
-          echo ""
-          echo "================ PRIVATE KEYS ================"
-          security find-key -a build.keychain || true
-
-          echo ""
-          echo "================ CERTIFICATES ================"
-          security find-certificate -a -Z build.keychain
-
-      - name: Debug Provisioning Profile
-        run: |
-          security cms -D -i profile.mobileprovision > profile.plist
-
-          echo "===== PROFILE ====="
-
-          /usr/libexec/PlistBuddy -c "Print :Name" profile.plist
-          /usr/libexec/PlistBuddy -c "Print :UUID" profile.plist
-          /usr/libexec/PlistBuddy -c "Print :TeamIdentifier:0" profile.plist
-          /usr/libexec/PlistBuddy -c "Print :Entitlements:application-identifier" profile.plist
-
-      - name: Debug Project Signing
-        run: |
-          grep -n "CODE_SIGN_STYLE" SampleApp.xcodeproj/project.pbxproj || true
-          grep -n "DEVELOPMENT_TEAM" SampleApp.xcodeproj/project.pbxproj || true
-          grep -n "PROVISIONING_PROFILE_SPECIFIER" SampleApp.xcodeproj/project.pbxproj || true
-          grep -n "PRODUCT_BUNDLE_IDENTIFIER" SampleApp.xcodeproj/project.pbxproj || true
-
-      - name: Show Build Settings
-        run: |
-          xcodebuild \
-            -project SampleApp.xcodeproj \
-            -scheme SampleApp \
-            -showBuildSettings \
-            | egrep "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM|CODE_SIGN_STYLE|PROVISIONING_PROFILE_SPECIFIER|CODE_SIGN_IDENTITY"
-
-      - name: Compare Project With Profile
-        run: |
-          security cms -D -i profile.mobileprovision > profile.plist
-
-          echo "===== PROFILE TEAM ====="
-          /usr/libexec/PlistBuddy \
-            -c "Print :TeamIdentifier:0" \
-            profile.plist
-
-          echo ""
-          echo "===== PROFILE APP ID ====="
-          /usr/libexec/PlistBuddy \
-            -c "Print :Entitlements:application-identifier" \
-            profile.plist
-
-          echo ""
-          echo "===== PROJECT BUILD SETTINGS ====="
-
-          xcodebuild \
-            -project SampleApp.xcodeproj \
-            -scheme SampleApp \
-            -showBuildSettings \
-            | egrep "PRODUCT_BUNDLE_IDENTIFIER|DEVELOPMENT_TEAM"
-
-      - name: List Installed Profiles
-        run: |
-          ls -al ~/Library/MobileDevice/Provisioning\ Profiles
-
-      - name: Deploy
-        env:
-          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
-          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
-          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
-          BUILD_NUMBER: ${{ github.event.inputs.BUILD_NUMBER }}
-        run: |
-          fastlane beta --verbose
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+          XCODE_PROJECT: ${{ secrets.XCODE_PROJECT }}
+          XCODE_SCHEME: ${{ secrets.XCODE_SCHEME }}
+          BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+        run: bundle exec fastlane beta --verbose
 
-      - name: Cleanup
+      # Runs even on failure — this is usually the difference between "guess
+      # what went wrong" and "read the actual xcodebuild error."
+      - name: Upload build artifacts and logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipa-and-logs-${{ github.run_id }}
+          path: |
+            build/*.ipa
+            ~/Library/Logs/gym/*.log
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Harmless no-op on a GitHub-hosted (ephemeral, wiped-after-run) runner —
+      # keep it in so this workflow stays drop-in compatible if you later move
+      # this job to your self-hosted Mac, where cleanup actually matters.
+      - name: Cleanup workspace secrets
         if: always()
         run: |
-          rm -f AuthKey.p8
-          rm -f certificate.p12
-          rm -f profile.mobileprovision
-          rm -f profile.plist
-          security delete-keychain build.keychain || true
+          rm -f /tmp/AuthKey_*.p8 /tmp/dist_cert_*.p12 /tmp/profile_*.mobileprovision
+          find ~/Library/Keychains -maxdepth 1 -name "ci_build_*.keychain-db" -mmin +60 -delete 2>/dev/null || true

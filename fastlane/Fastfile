@@ -1,61 +1,113 @@
+require "securerandom"
+require "tmpdir"
+
 default_platform(:ios)
 
 platform :ios do
+  desc "Build and upload a new build to TestFlight"
   lane :beta do
+    keychain_name     = "ci_build_#{Time.now.to_i}.keychain"
+    keychain_password = SecureRandom.hex(16)
+    api_key_path      = "#{Dir.tmpdir}/AuthKey_#{ENV['APP_STORE_CONNECT_API_KEY_KEY_ID']}.p8"
+    cert_path         = "#{Dir.tmpdir}/dist_cert_#{Time.now.to_i}.p12"
+    profile_path      = "#{Dir.tmpdir}/profile_#{Time.now.to_i}.mobileprovision"
 
-    api_key_path = "/tmp/AuthKey.p8"
+    begin
+      # 1. Ephemeral, isolated keychain — never touches the runner's login keychain.
+      #    This is what makes repeated runs on the same self-hosted Mac safe.
+      create_keychain(
+        name: keychain_name,
+        password: keychain_password,
+        default_keychain: false,
+        unlock: true,
+        timeout: 3600,
+        lock_when_sleeps: false
+      )
 
-    File.write(
-      api_key_path,
-      Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"])
-    )
+      # 2. App Store Connect API key — no Apple ID / 2FA prompts, works headless.
+      File.write(api_key_path, Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"]))
+      api_key = app_store_connect_api_key(
+        key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
+        issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
+        key_filepath: api_key_path,
+        in_house: false
+      )
 
-    api_key = app_store_connect_api_key(
-      key_id: ENV["APP_STORE_CONNECT_API_KEY_KEY_ID"],
-      issuer_id: ENV["APP_STORE_CONNECT_API_KEY_ISSUER_ID"],
-      key_filepath: api_key_path,
-      in_house: false
-    )
+      # 3. Import the distribution certificate into THIS run's keychain only.
+      File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
+      import_certificate(
+        certificate_path: cert_path,
+        certificate_password: ENV["IOS_CERTIFICATE_PASSWORD"],
+        keychain_name: keychain_name,
+        keychain_password: keychain_password
+      )
 
-    if ENV["BUILD_NUMBER"] && !ENV["BUILD_NUMBER"].empty?
-      build_number = ENV["BUILD_NUMBER"]
-    else
-      build_number = latest_testflight_build_number(
+      # 4. Install the provisioning profile (fastlane action — gives a real
+      #    error immediately if the profile is expired/invalid, unlike a raw cp).
+      File.write(profile_path, Base64.decode64(ENV["IOS_PROVISIONING_PROFILE"]))
+      profile_info = install_provisioning_profile(path: profile_path)
+
+      # 5. Resolve build number: manual override from workflow_dispatch input,
+      #    otherwise auto-increment off the latest TestFlight build.
+      build_number =
+        if ENV["BUILD_NUMBER"] && !ENV["BUILD_NUMBER"].empty?
+          ENV["BUILD_NUMBER"]
+        else
+          (latest_testflight_build_number(
+            api_key: api_key,
+            app_identifier: ENV["APP_IDENTIFIER"]
+          ) + 1).to_s
+        end
+
+      increment_build_number(
+        build_number: build_number,
+        xcodeproj: ENV["XCODE_PROJECT"]
+      )
+
+      # 6. Force manual signing pointed at exactly what we just installed.
+      #    This is the step that was missing before — without it, the project's
+      #    saved CODE_SIGN_STYLE can silently override your xcargs.
+      update_code_signing_settings(
+        use_automatic_signing: false,
+        team_id: ENV["TEAM_ID"],
+        code_sign_identity: "Apple Distribution",
+        profile_name: profile_info[:name],
+        targets: [ENV["XCODE_SCHEME"]],
+        path: ENV["XCODE_PROJECT"]
+      )
+
+      # 7. Build
+      build_app(
+        scheme: ENV["XCODE_SCHEME"],
+        project: ENV["XCODE_PROJECT"],
+        configuration: "Release",
+        clean: true,
+        output_directory: "./build",
+        output_name: "#{ENV['XCODE_SCHEME']}.ipa",
+        export_method: "app-store",
+        export_options: {
+          method: "app-store",
+          signingStyle: "manual",
+          provisioningProfiles: {
+            ENV["APP_IDENTIFIER"] => profile_info[:name]
+          }
+        }
+      )
+
+      # 8. Upload
+      upload_to_testflight(
         api_key: api_key,
-        app_identifier: ENV["APP_IDENTIFIER"]
-      ) + 1
+        ipa: "./build/#{ENV['XCODE_SCHEME']}.ipa",
+        skip_waiting_for_build_processing: true,
+        distribute_external: false
+      )
+
+      UI.success("✅ Uploaded to TestFlight — build #{build_number}")
+
+    ensure
+      # Always clean up secrets from disk, even on failure.
+      [api_key_path, cert_path, profile_path].each { |f| File.delete(f) if File.exist?(f) }
+      delete_keychain(name: keychain_name) rescue nil
     end
-
-    increment_build_number(
-      build_number: build_number,
-      xcodeproj: "SampleApp.xcodeproj"
-    )
-
-    build_app(
-    scheme: "SampleApp",
-    project: "SampleApp.xcodeproj",
-    configuration: "Release",
-    export_method: "app-store",
-    clean: true,
-    output_directory: "./build",
-    output_name: "SampleApp.ipa",
-    xcargs: %Q[
-        CODE_SIGN_STYLE=Manual
-        CODE_SIGN_IDENTITY="Apple Distribution"
-        DEVELOPMENT_TEAM=MWVFW922NX
-        PROVISIONING_PROFILE_SPECIFIER="match AppStore #{ENV["APP_IDENTIFIER"]}"
-    ]
-    )
-
-    upload_to_testflight(
-      api_key: api_key,
-      ipa: "./build/SampleApp.ipa",
-      skip_waiting_for_build_processing: true
-    )
-
-    UI.success("Uploaded to TestFlight! Build #{build_number}")
-
-  ensure
-    File.delete(api_key_path) if File.exist?(api_key_path)
   end
 end
