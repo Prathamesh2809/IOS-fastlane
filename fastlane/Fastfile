@@ -34,6 +34,10 @@ platform :ios do
         lock_when_sleeps: false
       )
 
+      # CRITICAL ADDITION: Force macOS to search this custom keychain for signing certificates
+      keychain_path_resolved = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
+      sh("security list-keychains -d user -s #{keychain_path_resolved.shellescape}")
+
       # 3. App Store Connect API key config
       File.write(api_key_path, Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"]))
       api_key = app_store_connect_api_key(
@@ -45,9 +49,6 @@ platform :ios do
 
       # 4. Import the distribution certificate with unlocked execution permissions
       File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
-      
-      # We use a custom shell command to bypass UI prompts for the imported keys
-      keychain_path_resolved = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
       sh("security import #{cert_path.shellescape} -k #{keychain_path_resolved.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
 
       # 5. Install and parse provisioning profile
