@@ -28,6 +28,10 @@ jobs:
           ruby -v
           xcodebuild -version
           fastlane --version
+      
+      - name: List available schemes
+        run: |
+          xcodebuild -list -project SampleApp.xcodeproj
 
       - name: Create App Store Connect API Key
         env:
