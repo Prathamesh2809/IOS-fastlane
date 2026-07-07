@@ -1,7 +1,7 @@
 default_platform(:ios)
 
 platform :ios do
-  desc "Build SampleApp using your existing local P12 certificate asset"
+  desc "Build SampleApp using your existing local App Store Distribution P12"
   lane :beta do
     raw_project  = ENV["XCODE_PROJECT"].to_s.strip
     project_name = raw_project.gsub(/\.xcodeproj$/, "")
@@ -31,7 +31,7 @@ platform :ios do
       keychain_db_path = File.expand_path("~/Library/Keychains/#{keychain_name}-db")
       sh("security list-keychains -d user -s #{keychain_db_path.shellescape}")
 
-      # 2. Write and import your EXISTING manual P12 certificate 
+      # 2. Write and import your EXISTING manual P12 certificate
       File.write(cert_path, Base64.decode64(ENV["IOS_CERTIFICATE_P12"]))
       sh("security import #{cert_path.shellescape} -k #{keychain_db_path.shellescape} -P #{ENV['IOS_CERTIFICATE_PASSWORD'].shellescape} -T /usr/bin/codesign -T /usr/bin/xcodebuild -A")
       sh("security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k #{keychain_password.shellescape} #{keychain_db_path.shellescape} > /dev/null 2>&1")
@@ -43,11 +43,10 @@ platform :ios do
         key_content: Base64.decode64(ENV["APP_STORE_CONNECT_API_KEY_B64"])
       )
 
-      # 4. Fetch the profile without forcing local certificate verification
+      # 4. Fetch the App Store profile (Switching from development -> app-store)
       get_provisioning_profile(
-        development: true, 
         app_identifier: ENV["APP_IDENTIFIER"],
-        skip_certificate_verification: true # 💡 Skip local identity check
+        skip_certificate_verification: true
       )
 
       # 5. Handle Incrementing Version Control
@@ -57,30 +56,31 @@ platform :ios do
         xcodeproj: project_path
       )
 
-      # 6. Apply cloud profile configuration settings
+      # 6. FORCE Manual Code Signing Settings
       update_code_signing_settings(
-        use_automatic_signing: true,
+        use_automatic_signing: false, # 💡 Turn off automatic signing
         team_id: ENV["TEAM_ID"],
-        path: project_path
+        path: project_path,
+        profile_name: Actions.lane_context[SharedValues::SIGH_NAME] # Maps the downloaded profile explicitly
       )
 
-      # 7. Compile the binary
+      # 7. Compile the binary for App Store distribution
       build_app(
         scheme: ENV["XCODE_SCHEME"],
         project: project_path,
-        configuration: "Debug",
+        configuration: "Release", # 💡 App Store profiles require Release configurations
         clean: true,
         output_directory: File.join(root_dir, "build"),
         output_name: "#{ENV['XCODE_SCHEME']}.ipa",
-        export_method: "development",
+        export_method: "app-store", # 💡 Aligns export to match your profile type
         export_options: {
-          method: "development",
-          signingStyle: "automatic"
+          method: "app-store",
+          signingStyle: "manual"
         },
-        xcargs: "DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} -allowProvisioningUpdates OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
+        xcargs: "DEVELOPMENT_TEAM=#{ENV['TEAM_ID']} PROVISIONING_PROFILE_SPECIFIER=\"#{Actions.lane_context[SharedValues::SIGH_NAME]}\" OTHER_CODE_SIGN_FLAGS=\"--keychain #{keychain_db_path.shellescape}\""
       )
 
-      UI.success("🎉 SampleApp built successfully using your existing certificate!")
+      UI.success("🎉 SampleApp built successfully using manual signing configuration!")
 
     ensure
       File.delete(cert_path) if File.exist?(cert_path)
