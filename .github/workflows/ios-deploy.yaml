@@ -1,0 +1,53 @@
+name: Deploy iOS App
+
+on:
+  workflow_dispatch:
+    inputs:
+      manual_version_number:
+        description: 'Marketing Version (Optional. E.g., 1.2, 2.0. Leave empty to keep current)'
+        required: false
+        default: ''
+      manual_build_number:
+        description: 'Build Number (Optional. Leave empty to auto-increment from TestFlight)'
+        required: false
+        default: ''
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, mac]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Verify Environment
+        run: |
+          echo "Current User:" && whoami
+          echo "Xcode Version:" && xcodebuild -version
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+      # 💡 CRITICAL: Install CocoaPods dependencies before compiling
+      - name: Install Pod Dependencies
+        run: |
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          pod install
+
+      - name: Deploy to TestFlight
+        env:
+          APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
+          APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
+          APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
+          # 💡 Double-check that this matches the Bundle ID for ScanApp in App Store Connect
+          APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }} 
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          TEAM_ID: ${{ secrets.TEAM_ID }}
+          ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
+        run: |
+          export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+          
+          bundle exec fastlane beta \
+            version_number:"${{ github.event.inputs.manual_version_number }}" \
+            build_number:"${{ github.event.inputs.manual_build_number }}" \
+          || fastlane beta \
+            version_number:"${{ github.event.inputs.manual_version_number }}" \
+            build_number:"${{ github.event.inputs.manual_build_number }}"
