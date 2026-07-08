@@ -1,46 +1,33 @@
-name: Deploy to TestFlight
+name: Deploy iOS App
 
 on:
   workflow_dispatch:
 
 jobs:
   deploy:
-    runs-on: macos-latest
+    runs-on: self-hosted
 
     steps:
-      - name: Checkout Codebase
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Ruby and Bundler
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundle-cache: true
-
-      - name: Install System Dependencies
+      - name: Verify Environment
         run: |
-          gem install fastlane --no-document
+          echo "Current User:" && whoami
+          echo "Ruby Version:" && ruby -v
+          echo "Xcode Version:" && xcodebuild -version
+          echo "Fastlane Location:" && which fastlane
+          echo "Fastlane Version:" && fastlane --version
 
-      - name: Execute Fastlane Automation
+      - name: Deploy to TestFlight
         env:
-          # App Store Connect API Key Options
           APP_STORE_CONNECT_API_KEY_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_KEY_ID }}
           APP_STORE_CONNECT_API_KEY_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}
           APP_STORE_CONNECT_API_KEY_B64: ${{ secrets.APP_STORE_CONNECT_API_KEY_B64 }}
-
-          # App Identification Variables
           APP_IDENTIFIER: ${{ secrets.APP_IDENTIFIER }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           TEAM_ID: ${{ secrets.TEAM_ID }}
           ITC_TEAM_ID: ${{ secrets.ITC_TEAM_ID }}
-
-          # App Metadata Configuration 
-          XCODE_PROJECT: ${{ secrets.XCODE_PROJECT }}   # Example: SampleApp (Do not include .xcodeproj extension)
-          XCODE_SCHEME: ${{ secrets.XCODE_SCHEME }}     # Example: SampleApp
-
-          # Code Signing File Assets
-          IOS_CERTIFICATE_P12: ${{ secrets.IOS_CERTIFICATE_P12 }}             # Base64 encoded .p12 distribution file
-          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}   # Password protecting your .p12 certificate
-          IOS_PROVISIONING_PROFILE: ${{ secrets.IOS_PROVISIONING_PROFILE }}   # Base64 encoded .mobileprovision profile
         run: |
-          bundle exec fastlane beta --verbose
+          # Safe fallback using bundle exec if installed via Bundler
+          bundle exec fastlane beta --verbose || fastlane beta --verbose
