@@ -1,8 +1,8 @@
 default_platform(:ios)
 
 platform :ios do
-  desc "Build and upload to TestFlight with smart incremental versioning"
-  lane :beta do |options| # 💡 Accepts custom options passed from the pipeline
+  desc "Build and upload to TestFlight with customizable versioning"
+  lane :beta do |options|
     api_key_path = "/tmp/AuthKey.p8"
 
     File.write(
@@ -17,13 +17,23 @@ platform :ios do
       in_house: false
     )
 
-    # 💡 Smart Build Number Resolution
-    target_build_number = options[:build_number]
+    # 1. 💡 Update Marketing Version (e.g., 1.2) if provided
+    target_version = options[:version_number]
+    if target_version.to_s.strip.empty?
+      UI.message("No explicit version number provided. Keeping current Xcode project version.")
+    else
+      UI.message("Setting marketing version to: #{target_version}")
+      increment_version_number(
+        version_number: target_version.to_s,
+        xcodeproj: "SampleApp.xcodeproj"
+      )
+    end
 
+    # 2. Smart Build Number Resolution
+    target_build_number = options[:build_number]
     if target_build_number.to_s.strip.empty?
       UI.message("No manual build number provided. Fetching latest from TestFlight...")
       begin
-        # Pulls down the highest sequential number tracking on App Store Connect
         current_online_build = latest_testflight_build_number(
           api_key: api_key,
           app_identifier: ENV["APP_IDENTIFIER"]
@@ -31,7 +41,6 @@ platform :ios do
         target_build_number = current_online_build + 1
         UI.message("Found live build number: #{current_online_build}. Incrementing to: #{target_build_number}")
       rescue => e
-        # Fallback if the app has absolutely zero builds uploaded yet
         UI.important("Could not find any existing builds on TestFlight. Defaulting to 1. Error: #{e.message}")
         target_build_number = "1"
       end
@@ -39,7 +48,7 @@ platform :ios do
       UI.message("Using manually provided build number: #{target_build_number}")
     end
 
-    # Apply the resolved versioning into Xcode targets
+    # Apply resolved internal build number
     increment_build_number(
       build_number: target_build_number.to_s,
       xcodeproj: "SampleApp.xcodeproj"
@@ -70,7 +79,7 @@ platform :ios do
       skip_waiting_for_build_processing: true
     )
 
-    UI.success("🎉 Uploaded to TestFlight! Successfully completed build: #{target_build_number}")
+    UI.success("🎉 Successfully deployed build to TestFlight!")
 
   ensure
     File.delete(api_key_path) if File.exist?(api_key_path)

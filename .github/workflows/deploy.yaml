@@ -3,6 +3,10 @@ name: Deploy iOS App
 on:
   workflow_dispatch:
     inputs:
+      manual_version_number:
+        description: 'Marketing Version (Optional. E.g., 1.2, 2.0. Leave empty to keep current)'
+        required: false
+        default: ''
       manual_build_number:
         description: 'Build Number (Optional. Leave empty to auto-increment from TestFlight)'
         required: false
@@ -21,7 +25,6 @@ jobs:
           echo "Current User:" && whoami
           echo "Xcode Version:" && xcodebuild -version
           export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-          which fastlane || echo "Fastlane not found in standard path"
 
       - name: Deploy to TestFlight
         env:
@@ -35,5 +38,10 @@ jobs:
         run: |
           export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
           
-          # 💡 Pass the optional workflow input value downstream safely as a parameter matrix
-          bundle exec fastlane beta build_number:"${{ github.event.inputs.manual_build_number }}" || fastlane beta build_number:"${{ github.event.inputs.manual_build_number }}"
+          # 💡 Passing both parameters to Fastlane
+          bundle exec fastlane beta \
+            version_number:"${{ github.event.inputs.manual_version_number }}" \
+            build_number:"${{ github.event.inputs.manual_build_number }}" \
+          || fastlane beta \
+            version_number:"${{ github.event.inputs.manual_version_number }}" \
+            build_number:"${{ github.event.inputs.manual_build_number }}"
